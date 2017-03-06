@@ -1,4 +1,4 @@
-// Copyright (c) 2014-2015 GAJ Geospatial Enterprises, Orlando FL
+// Copyright (c) 2016-2017 Visual Awareness Technologies and Consulting Inc, St Petersburg FL
 // This file is based on the Common Database (CDB) Specification for USSOCOM
 // Version 3.0 – October 2008
 
@@ -36,14 +36,17 @@
 CDB_GDAL_Drivers Gbl_TileDrivers;
 
 static int s_BaseMapLodNum = 0;
+static bool s_EnableBathymetry = true;
 
 const int Gbl_CDB_Tile_Sizes[11] = {1024, 512, 256, 128, 64, 32, 16, 8, 4, 2, 1};
 //Caution this only goes down to CDB Level 17
 const double Gbl_CDB_Tiles_Per_LOD[18] = {1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 128.0, 256.0, 512.0, 1024.0, 2048.0, 4096.0, 8192.0, 16384.0, 32768.0, 65536.0, 131072.0};
 
+OGR_File  Ogr_File_Instance;
+
 CDB_Tile::CDB_Tile(std::string cdbRootDir, std::string cdbCacheDir, CDB_Tile_Type TileType, std::string dataset, CDB_Tile_Extent *TileExtent, int NLod) : m_cdbRootDir(cdbRootDir), m_cdbCacheDir(cdbCacheDir),
 				   m_DataSet(dataset), m_TileExtent(*TileExtent), m_TileType(TileType), m_ImageContent_Status(NotSet), m_Tile_Status(Created), m_FileName(""), m_LayerName(""), m_FileExists(false),
-				   m_CDB_LOD_Num(0), m_Subordinate_Component(false), m_PrimaryName(""), m_lat_str(""), m_lon_str(""), m_lod_str(""), m_uref_str(""), m_rref_str("")
+				   m_CDB_LOD_Num(0), m_Subordinate_Exists(false), m_SubordinateName(""), m_lat_str(""), m_lon_str(""), m_lod_str(""), m_uref_str(""), m_rref_str(""), m_Subordinate_Tile(false)
 {
 	m_GTModelSet.clear();
 
@@ -55,13 +58,13 @@ CDB_Tile::CDB_Tile(std::string cdbRootDir, std::string cdbCacheDir, CDB_Tile_Typ
 	}
 
 	std::stringstream	buf;
-	std::stringstream	primarybuf;
+	std::stringstream	subordinatebuf;
 
 	m_CDB_LOD_Num = GetPathComponents(m_lat_str, m_lon_str, m_lod_str, m_uref_str, m_rref_str);
 
 	std::string filetype;
 	std::string datasetstr;
-	std::string primarydatasetstr;
+	std::string subordinatedatasetstr;
 
 	if (m_TileType == Elevation)
 	{
@@ -77,12 +80,7 @@ CDB_Tile::CDB_Tile(std::string cdbRootDir, std::string cdbCacheDir, CDB_Tile_Typ
 		}
 
 		datasetstr = "_D001" + m_DataSet;
-		size_t subPos = m_DataSet.find("_S100");
-		if (subPos != std::string::npos)
-		{
-			m_Subordinate_Component = true;
-			primarydatasetstr = "_D001_S001_T001_";
-		}
+		subordinatedatasetstr = "_D001_S100_T001_";
 		m_Pixels.pixType = GDT_Float32;
 		m_Pixels.bands = 1;
 	}
@@ -139,12 +137,12 @@ CDB_Tile::CDB_Tile(std::string cdbRootDir, std::string cdbCacheDir, CDB_Tile_Typ
 				<< "\\" << m_lat_str << m_lon_str << datasetstr << m_lod_str
 				<< "_" << m_uref_str << "_" << m_rref_str << filetype;
 
-			if (m_Subordinate_Component)
+			if ((m_TileType == Elevation) || (m_TileType == ElevationCache))
 			{
-				primarybuf << cdbRootDir
+				subordinatebuf << cdbRootDir
 					<< cdbCacheDir
 					<< "\\" << m_LayerName
-					<< "\\" << m_lat_str << m_lon_str << primarydatasetstr << m_lod_str
+					<< "\\" << m_lat_str << m_lon_str << subordinatedatasetstr << m_lod_str
 					<< "_" << m_uref_str << "_" << m_rref_str << filetype;
 			}
 		}
@@ -159,16 +157,16 @@ CDB_Tile::CDB_Tile(std::string cdbRootDir, std::string cdbCacheDir, CDB_Tile_Typ
 				<< "\\" << m_uref_str
 				<< "\\" << m_lat_str << m_lon_str << datasetstr << m_lod_str
 				<< "_" << m_uref_str << "_" << m_rref_str << filetype;
-			if (m_Subordinate_Component)
+			if ((m_TileType == Elevation) || (m_TileType == ElevationCache))
 			{
-				primarybuf << cdbRootDir
+				subordinatebuf << cdbRootDir
 					<< "\\Tiles"
 					<< "\\" << m_lat_str
 					<< "\\" << m_lon_str
 					<< "\\" << m_LayerName
 					<< "\\LC"
 					<< "\\" << m_uref_str
-					<< "\\" << m_lat_str << m_lon_str << primarydatasetstr << m_lod_str
+					<< "\\" << m_lat_str << m_lon_str << subordinatedatasetstr << m_lod_str
 					<< "_" << m_uref_str << "_" << m_rref_str << filetype;
 
 			}
@@ -186,16 +184,16 @@ CDB_Tile::CDB_Tile(std::string cdbRootDir, std::string cdbCacheDir, CDB_Tile_Typ
 			<< "\\" << m_lat_str << m_lon_str << datasetstr << m_lod_str
 			<< "_" << m_uref_str << "_" << m_rref_str << filetype;
 
-		if (m_Subordinate_Component)
+		if ((m_TileType == Elevation) || (m_TileType == ElevationCache))
 		{
-			primarybuf << cdbRootDir
+			subordinatebuf << cdbRootDir
 				<< "\\Tiles"
 				<< "\\" << m_lat_str
 				<< "\\" << m_lon_str
 				<< "\\" << m_LayerName
 				<< "\\" << m_lod_str
 				<< "\\" << m_uref_str
-				<< "\\" << m_lat_str << m_lon_str << primarydatasetstr << m_lod_str
+				<< "\\" << m_lat_str << m_lon_str << subordinatedatasetstr << m_lod_str
 				<< "_" << m_uref_str << "_" << m_rref_str << filetype;
 		}
 	}
@@ -324,9 +322,9 @@ CDB_Tile::CDB_Tile(std::string cdbRootDir, std::string cdbCacheDir, CDB_Tile_Typ
 			m_GTModelSet.push_back(t);
 		}
 	}
-	if (m_Subordinate_Component)
+	if ((m_TileType == Elevation) || (m_TileType == ElevationCache))
 	{
-		m_PrimaryName = primarybuf.str();
+		m_SubordinateName = subordinatebuf.str();
 	}
 
 
@@ -353,6 +351,13 @@ CDB_Tile::CDB_Tile(std::string cdbRootDir, std::string cdbCacheDir, CDB_Tile_Typ
 	else
 	{
 		m_FileExists = validate_tile_name(m_FileName);
+		if ((m_TileType == Elevation) || (m_TileType == ElevationCache))
+		{
+			if (s_EnableBathymetry)
+				m_Subordinate_Exists = validate_tile_name(m_SubordinateName);
+			else
+				m_Subordinate_Exists = false;
+		}
 	}
 
 	if (((m_TileType == GeoPackageMap)) && (!m_FileExists))
@@ -566,6 +571,11 @@ void CDB_Tile::Allocate_Buffers(void)
 	{
 		if (!m_GDAL.elevationdata)
 			m_GDAL.elevationdata = new float[bandbuffersize];
+		if (m_Subordinate_Exists || m_Subordinate_Tile)
+		{
+			if (!m_GDAL.subord_elevationdata)
+				m_GDAL.subord_elevationdata = new float[bandbuffersize];
+		}
 	}
 }
 
@@ -583,6 +593,11 @@ void CDB_Tile::Free_Buffers(void)
 		delete m_GDAL.elevationdata;
 		m_GDAL.elevationdata = NULL;
 	}
+	if (m_GDAL.subord_elevationdata)
+	{
+		delete m_GDAL.subord_elevationdata;
+		m_GDAL.subord_elevationdata = NULL;
+	}
 	if (m_Tile_Status == Loaded)
 	{
 		if (m_GDAL.poDataset)
@@ -599,6 +614,11 @@ void CDB_Tile::Close_Dataset(void)
 	{
 		GDALClose(m_GDAL.poDataset);
 		m_GDAL.poDataset = NULL;
+	}
+	if (m_GDAL.soDataset)
+	{
+		GDALClose(m_GDAL.soDataset);
+		m_GDAL.soDataset = NULL;
 	}
 	if (m_TileType == GeoTypicalModel)
 		Close_GT_Model_Tile();
@@ -647,8 +667,16 @@ bool CDB_Tile::Open_Tile(void)
 		return Open_GP_Map_Tile();
 	}
 	m_GDAL.poDataset = (GDALDataset *)m_GDAL.poDriver->pfnOpen(&oOpenInfo);
-
+	if (m_Subordinate_Exists)
+	{
+		GDALOpenInfo sOpenInfo(m_SubordinateName.c_str(), GA_ReadOnly);
+		m_GDAL.soDataset = (GDALDataset *)m_GDAL.poDriver->pfnOpen(&sOpenInfo);
+	}
 	if (!m_GDAL.poDataset)
+	{
+		return false;
+	}
+	if (m_Subordinate_Exists && !m_GDAL.soDataset)
 	{
 		return false;
 	}
@@ -915,7 +943,7 @@ OGRFeature * CDB_Tile::Next_Valid_Geospecific_Feature(bool inflated, std::string
 				ModelKeyName = Model_KeyName(myExtents.FACC_value, myExtents.FSC_value, myExtents.Model_Base_Name);
 				if (inflated)
 				{
-					FullModelName = Model_FullFileName(cnam, myExtents.Model_Base_Name);
+					FullModelName = Model_FullFileName(myExtents.FACC_value, myExtents.FSC_value, myExtents.Model_Base_Name);
 					Model_in_Archive = validate_tile_name(FullModelName);
 				}
 				else
@@ -1126,6 +1154,20 @@ bool CDB_Tile::Read(void)
 		{
 			return false;
 		}
+		if (m_Subordinate_Exists)
+		{
+			if (!m_GDAL.soDataset)
+				return false;
+
+			GDALRasterBand * SubordElevationBand = m_GDAL.soDataset->GetRasterBand(1);
+
+			gdal_err = SubordElevationBand->RasterIO(GF_Read, 0, 0, m_Pixels.pixX, m_Pixels.pixY,
+													 m_GDAL.subord_elevationdata, m_Pixels.pixX, m_Pixels.pixY, GDT_Float32, 0, 0);
+			if (gdal_err == CE_Failure)
+			{
+				return false;
+			}
+		}
 	}
 	m_Tile_Status = Loaded;
 
@@ -1149,6 +1191,13 @@ void CDB_Tile::Fill_Tile(void)
 		for (int i = 0; i < buffsz; ++i)
 		{
 			m_GDAL.elevationdata[i] = 0.0f;
+		}
+		if (m_Subordinate_Tile)
+		{
+			for (int i = 0; i < buffsz; ++i)
+			{
+				m_GDAL.subord_elevationdata[i] = 0.0f;
+			}
 		}
 
 	}
@@ -1182,6 +1231,16 @@ bool CDB_Tile::Tile_Exists(int sel)
 			return false;
 	}
 	return m_FileExists;
+}
+
+bool CDB_Tile::Subordinate_Exists(void)
+{
+	return m_Subordinate_Exists;
+}
+
+void CDB_Tile::Set_Subordinate(bool value)
+{
+	m_Subordinate_Tile = value;
 }
 
 bool CDB_Tile::Build_Cache_Tile(bool save_cache)
@@ -1315,6 +1374,8 @@ bool CDB_Tile::Build_Earth_Tile(void)
 
 	if (LodTile->Tile_Exists())
 	{
+		if (LodTile->Subordinate_Exists())
+			m_Subordinate_Tile = true;
 		OE_DEBUG "CDB_Tile found " << LodTile->FileName().c_str() << std::endl;
 		Tiles.push_back(LodTile);
 	}
@@ -1380,6 +1441,14 @@ double CDB_Tile::Get_Lon_Step(double Latitude)
 
 	}
 	return step;
+}
+
+void CDB_Tile::Disable_Bathyemtry(bool value)
+{
+	if (value)
+		s_EnableBathymetry = false;
+	else
+		s_EnableBathymetry = true;
 }
 
 bool CDB_Tile::Initialize_Tile_Drivers(std::string &ErrorMsg)
@@ -1665,6 +1734,49 @@ bool CDB_Tile::Get_Elevation_Pixel(coord2d ImPix, float &ElevationPix)
 	return true;
 }
 
+bool CDB_Tile::Get_Subordinate_Elevation_Pixel(coord2d ImPix, float &ElevationPix)
+{
+	int tx = (int)ImPix.Xpos;
+	int ty = (int)ImPix.Ypos;
+
+	if ((tx < 0) || (tx > m_Pixels.pixX - 1) || (ty < 0) || (ty > m_Pixels.pixY - 1))
+	{
+		return false;
+	}
+
+	int bpos1 = (((int)ImPix.Ypos) * m_Pixels.pixX) + (int)ImPix.Xpos;
+	int bpos2 = bpos1 + 1;
+	int bpos3 = bpos1 + (int)m_Pixels.pixX;
+	int bpos4 = bpos3 + 1;
+
+	if (tx == m_Pixels.pixX - 1)
+	{
+		bpos2 = bpos1;
+		bpos4 = bpos3;
+	}
+
+	if (ty == m_Pixels.pixY - 1)
+	{
+		bpos3 = bpos1;
+		if (tx == m_Pixels.pixX - 1)
+			bpos4 = bpos1;
+		else
+			bpos4 = bpos2;
+	}
+
+	float rat2 = (float)(ImPix.Xpos - double(tx));
+	float rat1 = 1.0f - rat2;
+	float rat4 = (float)(ImPix.Ypos - double(ty));
+	float rat3 = 1.0f - rat4;
+
+	float e1p = (m_GDAL.subord_elevationdata[bpos1] * rat1) + (m_GDAL.subord_elevationdata[bpos2] * rat2);
+	float e2p = (m_GDAL.subord_elevationdata[bpos3] * rat1) + (m_GDAL.subord_elevationdata[bpos4] * rat2);
+	float elevation = (e1p * rat3) + (e2p * rat4);
+
+	ElevationPix = elevation;
+	return true;
+}
+
 double CDB_Tile::West(void)
 {
 	return m_TileExtent.West;
@@ -1687,6 +1799,15 @@ double CDB_Tile::South(void)
 
 void CDB_Tile::Build_From_Tiles(CDB_TilePV *Tiles, bool from_scratch)
 {
+
+	for each (CDB_TileP tile in *Tiles)
+	{
+		if (tile->Subordinate_Exists())
+		{
+			m_Subordinate_Tile = true;
+			break;
+		}
+	}
 
 	Allocate_Buffers();
 
@@ -1730,6 +1851,7 @@ void CDB_Tile::Build_From_Tiles(CDB_TilePV *Tiles, bool from_scratch)
 				int buffloc = 0;
 				coord2d clatlon;
 				clatlon.Ypos = srowlat;
+				bool proces_subordinate = m_Subordinate_Tile && tile->Subordinate_Exists();
 				for (int iy = sy; iy <= ey; ++iy)
 				{
 					buffloc = (iy * m_Pixels.pixX) + sx;
@@ -1750,6 +1872,8 @@ void CDB_Tile::Build_From_Tiles(CDB_TilePV *Tiles, bool from_scratch)
 						else if ((m_TileType == Elevation) || (m_TileType == ElevationCache))
 						{
 							tile->Get_Elevation_Pixel(impix, m_GDAL.elevationdata[buffloc]);
+							if(proces_subordinate)
+								tile->Get_Subordinate_Elevation_Pixel(impix, m_GDAL.subord_elevationdata[buffloc]);
 						}
 						++buffloc;
 						clatlon.Xpos += XRes;
@@ -1847,6 +1971,18 @@ bool CDB_Tile::Save(void)
 			char *projection = NULL;
 			CDB_SRS->exportToWkt(&projection);
 			m_GDAL.poDataset->SetProjection(projection);
+			if (m_Subordinate_Tile)
+			{
+				m_GDAL.soDataset = m_GDAL.poDriver->Create(m_SubordinateName.c_str(), m_Pixels.pixX, m_Pixels.pixY, m_Pixels.bands, dataType, papszOptions);
+
+				if (!m_GDAL.soDataset)
+				{
+					delete CDB_SRS;
+					return false;
+				}
+				m_GDAL.soDataset->SetGeoTransform(m_GDAL.adfGeoTransform);
+				m_GDAL.poDataset->SetProjection(projection);
+			}
 			CPLFree(projection);
 		}
 		//Write the elevation data to the file
@@ -1891,12 +2027,20 @@ bool CDB_Tile::Write(void)
 	}
 	else if (m_TileType == ElevationCache)
 	{
-
 		GDALRasterBand * ElevationBand = m_GDAL.poDataset->GetRasterBand(1);
 		gdal_err = ElevationBand->RasterIO(GF_Write, 0, 0, m_Pixels.pixX, m_Pixels.pixY, m_GDAL.elevationdata, m_Pixels.pixX, m_Pixels.pixY, GDT_Float32, 0, 0);
 		if (gdal_err == CE_Failure)
 		{
 			return false;
+		}
+		if (m_Subordinate_Tile)
+		{
+			GDALRasterBand * SoElevationBand = m_GDAL.soDataset->GetRasterBand(1);
+			gdal_err = SoElevationBand->RasterIO(GF_Write, 0, 0, m_Pixels.pixX, m_Pixels.pixY, m_GDAL.subord_elevationdata, m_Pixels.pixX, m_Pixels.pixY, GDT_Float32, 0, 0);
+			if (gdal_err == CE_Failure)
+			{
+				return false;
+			}
 		}
 	}
 	return true;
@@ -1961,7 +2105,10 @@ osg::HeightField* CDB_Tile::HeightField_From_Tile(void)
 					h = NO_DATA_VALUE;
 				}
 #endif
-				field->setHeight(c, inv_r, m_GDAL.elevationdata[ibpos]);
+				if(m_Subordinate_Exists || m_Subordinate_Tile)
+					field->setHeight(c, inv_r, (m_GDAL.elevationdata[ibpos] - m_GDAL.subord_elevationdata[ibpos]));
+				else
+					field->setHeight(c, inv_r, m_GDAL.elevationdata[ibpos]);
 				++ibpos;
 			}
 		}
@@ -1994,7 +2141,7 @@ std::string CDB_Tile::Set_FileType(std::string Name, std::string type)
 
 }
 
-std::string CDB_Tile::Model_FullFileName(std::string &AttrName, std::string &BaseFileName)
+std::string CDB_Tile::Model_FullFileName(std::string &FACC_value, std::string &FSC_value, std::string &BaseFileName)
 {
 	std::stringstream modbuf;
 	modbuf << m_cdbRootDir
@@ -2006,7 +2153,7 @@ std::string CDB_Tile::Model_FullFileName(std::string &AttrName, std::string &Bas
 		<< "\\" << m_uref_str
 		<< "\\" << m_lat_str << m_lon_str << "_D300_S001_T001_" << m_lod_str
 		<< "_" << m_uref_str << "_" << m_rref_str << "_"
-		<< AttrName.substr(0, 5) << "_" << AttrName.substr(5, 3) << "_"
+		<< FACC_value << "_" << FSC_value << "_"
 		<< BaseFileName << ".flt";
 	return modbuf.str();
 }
@@ -2125,6 +2272,8 @@ bool CDB_Tile::validate_tile_name(std::string &filename)
 		{
 			return false;
 		}
+		else
+			return false;
 	}
 	return true;
 #else
@@ -2182,4 +2331,392 @@ osgDB::Archive::FileNameList * CDB_Tile::Model_Archive_List(void)
 	if (m_TileType != GeoSpecificModel)
 		return NULL;
 	return &m_ModelSet.archiveFileList;
+}
+
+OGR_File::OGR_File() : m_FileName(""), m_Driver(""), m_oSRS(NULL), m_OutputIsShape(false), m_PODataset(NULL), m_FID(0), m_FileExists(false)
+{
+}
+
+OGR_File::OGR_File(std::string FileName, std::string Driver) :m_FileName(FileName), m_Driver(Driver), m_oSRS(NULL), m_OutputIsShape(false), m_PODataset(NULL), m_FID(0)
+{
+	m_FileExists = CDB_Tile::validate_tile_name(m_FileName);
+}
+
+OGR_File::~OGR_File()
+{
+
+}
+
+bool OGR_File::SetName_and_Driver(std::string Name, std::string Driver)
+{
+	m_FileName = Name;
+	m_Driver = Driver;
+	m_FileExists = CDB_Tile::validate_tile_name(m_FileName);
+	return m_FileExists;
+}
+OGR_File * OGR_File::GetInstance(void)
+{
+	return &Ogr_File_Instance;
+}
+
+bool OGR_File::Exists(void)
+{
+	return m_FileExists;
+}
+
+GDALDataset * OGR_File::Open_Output_File(std::string FileName, bool FileExists)
+{
+#if 0
+	while (!m_OpenLock->Lock())
+	{
+		Sleep(1000);
+	}
+#endif
+
+	if (m_Driver == "ESRI Shapefile")
+		m_OutputIsShape = true;
+
+	GDALDataset *poDS = NULL;
+	GDALDriver * poDriver = GetGDALDriverManager()->GetDriverByName(m_Driver.c_str());
+
+	if (poDriver != NULL)
+	{
+		if (!FileExists)
+		{
+			poDS = poDriver->Create(FileName.c_str(), 0, 0, 0, GDT_Unknown, NULL);
+			if (poDS == NULL)
+			{
+				std::string Message = "Unable to create output file " + FileName;
+				printf("%s\n", Message.c_str());
+#if 0
+				m_OpenLock->Unlock();
+#endif
+				return NULL;
+			}
+		}
+		else
+		{
+			GDALOpenInfo poOpenInfo(FileName.c_str(), GA_Update | GDAL_OF_VECTOR);
+			poDS = poDriver->pfnOpen(&poOpenInfo);
+			if (poDS == NULL)
+			{
+				std::string Message = "Unable to open output file " + FileName;
+				printf("%s\n", Message.c_str());
+#if 0
+				m_OpenLock->Unlock();
+#endif
+				return NULL;
+			}
+		}
+		if (m_oSRS == NULL)
+		{
+			Set_oSRS();
+		}
+	}
+	else
+	{
+		std::string Message = "Unable to obtain driver for " + m_Driver;
+		printf("%s\n", Message.c_str());
+#if 0
+		m_OpenLock->Unlock();
+#endif
+		return NULL;
+	}
+
+#if 0
+	m_OpenLock->Unlock();
+#endif
+
+	return poDS;
+}
+
+void OGR_File::Set_oSRS(void)
+{
+	if (m_oSRS == NULL)
+	{
+		m_oSRS = new OGRSpatialReference();
+		m_oSRS->SetWellKnownGeogCS("WGS84");
+	}
+}
+
+GDALDataset * OGR_File::Open_Output(void)
+{
+	m_PODataset = Open_Output_File(m_FileName, m_FileExists);
+	return m_PODataset;
+}
+
+OGRLayer * OGR_File::Get_Or_Create_Layer(std::string LayerName, osgEarth::Features::Feature * f)
+{
+	return Get_Or_Create_Layer(m_PODataset, LayerName, f);
+}
+
+OGRLayer * OGR_File::Get_Or_Create_Layer(GDALDataset *poDS, std::string LayerName, osgEarth::Features::Feature * f)
+{
+	OGRLayer *poLayer = NULL;
+	if (poDS->TestCapability(ODsCCreateLayer))
+	{
+		poLayer = poDS->GetLayerByName(LayerName.c_str());
+		if (!poLayer)
+		{
+			OGRSpatialReference * LayerSRS = new OGRSpatialReference(*m_oSRS);
+			osgEarth::Symbology::Geometry * geo = f->getGeometry();
+			osgEarth::Symbology::Geometry::Type gtype = geo->getType();
+			OGRwkbGeometryType OgrGtype = wkbPoint25D;
+			if (gtype == osgEarth::Symbology::Geometry::Type::TYPE_POINTSET)
+				OgrGtype = wkbPoint25D;
+			else if (gtype == osgEarth::Symbology::Geometry::Type::TYPE_POLYGON)
+				OgrGtype = wkbPolygon25D;
+			else if (gtype == osgEarth::Symbology::Geometry::Type::TYPE_LINESTRING)
+				OgrGtype = wkbLineString25D;
+			poLayer = poDS->CreateLayer(LayerName.c_str(), LayerSRS, OgrGtype, NULL);
+			if (poLayer)
+			{
+				if (!Set_Layer_Fields(f, poLayer))
+				{
+					std::string Message = "Failure to set Layer Feilds in " + m_FileName;
+					printf("%s\n", Message.c_str());
+					return NULL;
+				}
+			}
+		}
+		else
+		{
+			if (!Check_Layer_Fields(f, poLayer))
+			{
+				std::string Message = "Failure to set Layer Feilds in " + m_FileName;
+				printf("%s\n", Message.c_str());
+				return NULL;
+			}
+
+		}
+	}
+	else
+	{
+		std::string Message = "Unable to create layers in file " + m_FileName;
+		printf("%s\n", Message.c_str());
+		return NULL;
+	}
+	return poLayer;
+}
+
+bool OGR_File::Set_Layer_Fields(osgEarth::Features::Feature * f, OGRLayer * poLayer)
+{
+	osgEarth::Features::AttributeTable t = f->getAttrs();
+	for (osgEarth::Features::AttributeTable::iterator ti = t.begin(); ti != t.end(); ++ti)
+	{
+		std::pair<std::string, osgEarth::Features::AttributeValue> temp;
+		temp = *ti;
+		std::string name = temp.first;
+		osgEarth::Features::AttributeValue value = temp.second;
+		osgEarth::Features::AttributeType attrType = value.first;
+		OGRFieldType ogrType;
+		if (attrType == osgEarth::Features::AttributeType::ATTRTYPE_BOOL)
+		{
+			ogrType = OFTInteger;
+		}
+		else if (attrType == osgEarth::Features::AttributeType::ATTRTYPE_DOUBLE)
+		{
+			ogrType = OFTReal;
+		}
+		else if (attrType == osgEarth::Features::AttributeType::ATTRTYPE_INT)
+		{
+			ogrType = OFTInteger;
+		}
+		else if (attrType == osgEarth::Features::AttributeType::ATTRTYPE_STRING)
+		{
+			ogrType = OFTString;
+		}
+		else if (attrType == osgEarth::Features::AttributeType::ATTRTYPE_UNSPECIFIED)
+		{
+			ogrType = OFTBinary;
+		}
+
+		OGRFieldDefn po_FieldDefn(name.c_str(), ogrType);
+		if (poLayer->CreateField(&po_FieldDefn) != OGRERR_NONE)
+		{
+			std::stringstream	buf;
+			buf << "Unable to create Feild " << name << " in " << poLayer->GetName();
+			std::string Message = buf.str();
+			printf("%s\n", Message.c_str());
+			return false;
+		}
+
+	}
+	return true;
+}
+
+bool OGR_File::Check_Layer_Fields(osgEarth::Features::Feature * f, OGRLayer * poLayer)
+{
+	OGRFeatureDefn *LayerDef = poLayer->GetLayerDefn();
+	int Defncnt = LayerDef->GetFieldCount();
+	bool retval = true;
+	osgEarth::Features::AttributeTable t = f->getAttrs();
+	for (osgEarth::Features::AttributeTable::iterator ti = t.begin(); ti != t.end(); ++ti)
+	{
+		std::pair<std::string, osgEarth::Features::AttributeValue> temp;
+		temp = *ti;
+		std::string name = temp.first;
+		osgEarth::Features::AttributeValue value = temp.second;
+		osgEarth::Features::AttributeType attrType = value.first;
+		OGRFieldType ogrType;
+		if (attrType == osgEarth::Features::AttributeType::ATTRTYPE_BOOL)
+		{
+			ogrType = OFTInteger;
+		}
+		else if (attrType == osgEarth::Features::AttributeType::ATTRTYPE_DOUBLE)
+		{
+			ogrType = OFTReal;
+		}
+		else if (attrType == osgEarth::Features::AttributeType::ATTRTYPE_INT)
+		{
+			ogrType = OFTInteger;
+		}
+		else if (attrType == osgEarth::Features::AttributeType::ATTRTYPE_STRING)
+		{
+			ogrType = OFTString;
+		}
+		else if (attrType == osgEarth::Features::AttributeType::ATTRTYPE_UNSPECIFIED)
+		{
+			ogrType = OFTBinary;
+		}
+		
+		bool have_attr = false;
+		bool add_attr = false;
+		bool bad_attr = false;
+		for (int i = 0; i < Defncnt; ++i)
+		{
+			OGRFieldDefn *po_FieldDefn = LayerDef->GetFieldDefn(i);
+			std::string nameref = po_FieldDefn->GetNameRef();
+			if (nameref == name)
+			{
+				if (ogrType == po_FieldDefn->GetType())
+				{
+					have_attr = true;
+				}
+				else
+					bad_attr = true;
+				break;
+			}
+		}
+		if (!have_attr && !bad_attr)
+		{
+			OGRFieldDefn npo_FieldDefn(name.c_str(), ogrType);
+			if (poLayer->CreateField(&npo_FieldDefn) != OGRERR_NONE)
+			{
+				std::stringstream	buf;
+				buf << "Unable to create Feild " << name << " in " << poLayer->GetName();
+				std::string Message = buf.str();
+				printf("%s\n", Message.c_str());
+				return false;
+			}
+		}
+		if (bad_attr)
+			retval = false;
+	}
+	return retval;
+}
+
+bool OGR_File::Add_Feature_to_Layer(OGRLayer *oLayer, osgEarth::Features::Feature * f)
+{
+	bool retval = true;
+	OGRFeatureDefn *FeaDefn = oLayer->GetLayerDefn();
+	OGRFeature * OFeature = OGRFeature::CreateFeature(FeaDefn);
+	OFeature->SetFID(m_FID);
+	++m_FID;
+	for (int i = 0; i < FeaDefn->GetFieldCount(); ++i)
+	{
+		OGRFieldDefn * Fdefn = FeaDefn->GetFieldDefn(i);
+		OGRFieldType ogrType = Fdefn->GetType();
+		std::string FieldName = Fdefn->GetNameRef();
+		if (ogrType == OFTInteger)
+		{
+			int intval = f->getInt(FieldName);
+			OFeature->SetField(i, intval);
+		}
+		else if (ogrType == OFTReal)
+		{
+			double doubleval = f->getDouble(FieldName);
+			OFeature->SetField(i, doubleval);
+		}
+		else if (ogrType == OFTString)
+		{
+			std::string stringval = f->getString(FieldName);
+			OFeature->SetField(i, stringval.c_str());
+		}
+
+	}
+
+	osgEarth::Symbology::Geometry * geo = f->getGeometry();
+	osgEarth::Symbology::Geometry::Type gtype = geo->getType();
+	OGRwkbGeometryType OgrGtype = wkbPoint25D;
+	if (gtype == osgEarth::Symbology::Geometry::Type::TYPE_POINTSET)
+		OgrGtype = wkbPoint25D;
+	else if (gtype == osgEarth::Symbology::Geometry::Type::TYPE_POLYGON)
+		OgrGtype = wkbPolygon25D;
+	else if (gtype == osgEarth::Symbology::Geometry::Type::TYPE_LINESTRING)
+		OgrGtype = wkbLineString25D;
+	if (OgrGtype == wkbPoint25D)
+	{
+		OGRPoint poPoint;
+		osg::Vec3d vec = geo->at(0);
+		poPoint.setX(vec.x());
+		poPoint.setY(vec.y());
+		poPoint.setZ(vec.z());
+		OFeature->SetGeometry(&poPoint);
+	}
+	else if (OgrGtype == wkbPolygon25D)
+	{
+		OGRPolygon poPolygon;
+		OGRLinearRing poRing;
+		for (int ii = 0; ii < geo->size(); ++ii)
+		{
+			OGRPoint poPoint;
+			osg::Vec3d vec = geo->at(ii);
+			poPoint.setX(vec.x());
+			poPoint.setY(vec.y());
+			poPoint.setZ(vec.z());
+			poRing.addPoint(&poPoint);
+		}
+		poPolygon.addRing(&poRing);
+		OFeature->SetGeometry(&poPolygon);
+	}
+	else if (OgrGtype == wkbLineString25D)
+	{
+		OGRLineString oLineString;
+		for (int ii = 0; ii < geo->size(); ++ii)
+		{
+			OGRPoint poPoint;
+			osg::Vec3d vec = geo->at(ii);
+			poPoint.setX(vec.x());
+			poPoint.setY(vec.y());
+			poPoint.setZ(vec.z());
+			oLineString.addPoint(&poPoint);
+		}
+		OFeature->SetGeometry(&oLineString);
+	}
+	OGRErr oErr = oLayer->CreateFeature(OFeature);
+	if (oErr != OGRERR_NONE)
+		retval = false;
+	OGRFeature::DestroyFeature(OFeature);
+	return retval;
+}
+
+bool OGR_File::Close_File(void)
+{
+	bool retval = false;
+	if (m_PODataset)
+	{
+		GDALClose(m_PODataset);
+		m_PODataset = NULL;
+		m_FID = 0;
+		m_FileName = "";
+		m_FileExists = false;
+		if (m_oSRS)
+		{
+			delete m_oSRS;
+			m_oSRS = NULL;
+		}
+		retval = true;
+	}
+	return retval;
 }

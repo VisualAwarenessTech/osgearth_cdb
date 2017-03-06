@@ -17,32 +17,26 @@
 // FalconView(tm) is a trademark of Georgia Tech Research Corporation.
 // 2014-2015 GAJ Geospatial Enterprises, Orlando FL
 // Modified for General Incorporation of Common Database (CDB) support within osgEarth
+// 2016-2017 Visual Awareness Technologies and Consulting Inc. St Petersburg FL
 
-// CDBTileSourceDriver.cpp
+// CDBTileSourceDriver
 //
 
-#include <osgDB\FileNameUtils>
+#ifndef OSGEARTH_DRIVERS_CDBTILESOURCEDRIVER
+#define OSGEARTH_DRIVERS_CDBTILESOURCEDRIVER 1
 
-#include "CDBTileSource"
-#include "CDBTileSourceDriver"
+#include <osgDB\ReaderWriter>
+#include <osgEarth\TileSource>
 
-CDBTileSourceDriver::CDBTileSourceDriver()
+class CDBTileSourceDriver : public osgEarth::TileSourceDriver
 {
-   supportsExtension( "osgearth_cdb", "Common Database" );
-}
+    public:
+        CDBTileSourceDriver();
 
-const char* CDBTileSourceDriver::className()
-{
-   return "Common Database ReaderWriter";
-}
+        virtual const char* className();
 
-osgDB::ReaderWriter::ReadResult CDBTileSourceDriver::readObject(
-   const std::string& file_name, const Options* options) const
-{
-   if ( !acceptsExtension(osgDB::getLowerCaseFileExtension( file_name )))
-         return osgDB::ReaderWriter::ReadResult::FILE_NOT_HANDLED;
+        virtual osgDB::ReaderWriter::ReadResult readObject(
+           const std::string& file_name, const Options* options) const;
+};
 
-   return new CDBTileSource( getTileSourceOptions(options) );
-}
-
-REGISTER_OSGPLUGIN(osgearth_cdb, CDBTileSourceDriver)
+#endif // OSGEARTH_DRIVERS_CDBTILESOURCEDRIVER

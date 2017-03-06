@@ -18,6 +18,7 @@
  */
 // 2014-2015 GAJ Geospatial Enterprises, Orlando FL
 // Created FeatureSourceCDB for Incorporation of Common Database (CDB) support within osgEarth
+// 2016-2017 Visual Awareness Technologies and Consulting Inc. St Petersburg FL
 
 #include "CDBFeatureOptions"
 #include <CDB_TileLib/CDB_Tile>
@@ -56,6 +57,12 @@
 #endif
 
 #define LC "[CDB FeatureSource] "
+
+#if 0
+#ifdef _DEBUG
+#define _SAVE_OGR_OUTPUT
+#endif
+#endif
 
 using namespace osgEarth;
 using namespace osgEarth::Util;
@@ -106,31 +113,56 @@ public:
 	  _rootString(""),
 	  _cacheDir(""),
 	  _dataSet("_S001_T001_")
-    {                
+#ifdef _SAVE_OGR_OUTPUT
+	,_OGR_Output(NULL),
+	_OGR_OutputName("C:\\Temp\\GeoSpecificModelCapture.gpkg"),
+	_OGR_OutputDriver("GPKG"),
+	_OGR_OutputLayerName("GeoSpecificModelData"),
+	_OGR_OutputLayer(NULL)
+#endif
+	{
     }
 
     /** Destruct the object, cleaning up and OGR handles. */
     virtual ~CDBFeatureSource()
     {               
-        //nop
+#ifdef _SAVE_OGR_OUTPUT
+		if (_OGR_Output)
+			_OGR_Output->Close_File();
+#endif
+		//nop
     }
 
     //override
-    void initialize( const osgDB::Options* dbOptions )
+    Status initialize( const osgDB::Options* dbOptions )
     {
         _dbOptions = dbOptions ? osg::clone(dbOptions) : 0L;
 
-		osgEarth::CachePolicy::NO_CACHE.apply(_dbOptions.get());
+//		osgEarth::CachePolicy::NO_CACHE.apply(_dbOptions.get());
 		//ToDo when working reenable  the cache disable for development 
+#ifdef _SAVE_OGR_OUTPUT
+		bool geospecific = true;
+		if (_options.geoTypical().isSet())
+		{
+			if (_options.geoTypical().value())
+			{
+				geospecific = false;
+			}
+		}
+		if (geospecific)
+		{
+			_OGR_Output = OGR_File::GetInstance();
+			_OGR_Output->SetName_and_Driver(_OGR_OutputName, _OGR_OutputDriver);
+			GDALDataset *poDataSet = _OGR_Output->Open_Output();
+			if (!poDataSet)
+			{
+				OE_WARN << "Unable to open output GeoPackage file" << std::endl;
+			}
+		}
+#endif
 
-	}
+		FeatureProfile* Feature_Profile = NULL;
 
-
-    /** Called once at startup to create the profile for this feature set. Successful profile
-        creation implies that the datasource opened succesfully. */
-    const FeatureProfile* createFeatureProfile()
-    {
-        FeatureProfile* result = NULL;
 		const Profile * CDBFeatureProfile = NULL;
 		if (_options.inflated().isSet())
 			_CDB_inflated = _options.inflated().value();
@@ -204,12 +236,12 @@ public:
 		if (!CDBFeatureProfile)
 			CDBFeatureProfile =osgEarth::Profile::create("EPSG:4326", "", 90U, 45U);
 
-		result = new FeatureProfile(CDBFeatureProfile->getExtent());
-		result->setTiled( true );
+		Feature_Profile = new FeatureProfile(CDBFeatureProfile->getExtent());
+		Feature_Profile->setTiled( true );
 		// Should work for now 
-		result->setFirstLevel(minLod);
-		result->setMaxLevel( maxLod);
-		result->setProfile(CDBFeatureProfile);
+		Feature_Profile->setFirstLevel(minLod);
+		Feature_Profile->setMaxLevel( maxLod);
+		Feature_Profile->setProfile(CDBFeatureProfile);
 
 		// Make sure the root directory is set
 		if (!_options.rootDir().isSet())
@@ -230,7 +262,15 @@ public:
 			errorset = true;
 		}
 
-		return result;
+		if (Feature_Profile)
+		{
+			setFeatureProfile(Feature_Profile);
+		}
+		else
+		{
+			return Status::Error(Status::ResourceUnavailable, "CDBFeatureSource Failed to establish a valid feature profile");
+		}
+		return Status::OK();
     }
 
 	
@@ -643,7 +683,22 @@ private:
 				}
 //test
 				if (valid_model)
+				{
+#ifdef _SAVE_OGR_OUTPUT
+					if (_OGR_Output)
+					{
+						if (!_OGR_OutputLayer)
+						{
+							_OGR_OutputLayer = _OGR_Output->Get_Or_Create_Layer(_OGR_OutputLayerName, f);
+						}
+						if (_OGR_OutputLayer)
+						{
+							_OGR_Output->Add_Feature_to_Layer(_OGR_OutputLayer, f);
+						}
+					}
+#endif
 					features.push_back(f.release());
+				}
 				else
 					f.release();
 			}
@@ -748,6 +803,13 @@ private:
 	std::string						_cacheDir;
 	std::string						_dataSet;
 	int								_cur_Feature_Cnt;
+#ifdef _SAVE_OGR_OUTPUT
+	OGR_File *						_OGR_Output;
+	std::string						_OGR_OutputName;
+	std::string						_OGR_OutputDriver;
+	std::string						_OGR_OutputLayerName;
+	OGRLayer *						_OGR_OutputLayer;
+#endif
 };
 
 
