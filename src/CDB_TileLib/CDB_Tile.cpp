@@ -1,6 +1,6 @@
 // Copyright (c) 2016-2017 Visual Awareness Technologies and Consulting Inc, St Petersburg FL
 // This file is based on the Common Database (CDB) Specification for USSOCOM
-// Version 3.0 – October 2008
+// Version 3.0 â€“ October 2008
 
 // CDB_Tile is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
@@ -257,7 +257,7 @@ CDB_Tile::CDB_Tile(std::string cdbRootDir, std::string cdbCacheDir, CDB_Tile_Typ
 		m_ModelSet.PrimaryLayerName = laybuf.str();
 
 		std::stringstream clslaybuf;
-		clslaybuf << "100_GTFeature_S" << std::setfill('0') << std::setw(3) << abs(i) << "_T"
+		clslaybuf << "100_GSFeature_S" << std::setfill('0') << std::setw(3) << abs(i) << "_T"
 			<< std::setfill('0') << std::setw(3) << abs(Tnum + 1) << "_Cls";
 		m_ModelSet.ClassLayerName = clslaybuf.str();
 
